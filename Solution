@@ -1,0 +1,83 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+#define HEAP_SIZE 128 * 1024 // 128KB
+#define MIN_BLOCK_SIZE 1024  // 1KB
+
+typedef struct Block {
+    size_t size;
+    bool is_free;
+    struct Block* next;
+} Block;
+
+Block* heap = NULL;
+
+void init_heap() {
+    heap = (Block*)malloc(HEAP_SIZE);
+    heap->size = HEAP_SIZE;
+    heap->is_free = true;
+    heap->next = NULL;
+}
+
+void* dma_malloc(size_t size) {
+    if (size == 0 || size > HEAP_SIZE) return NULL;// if size is equal to zero or greater total size return null
+
+    size_t total_size = ((size + MIN_BLOCK_SIZE - 1) / MIN_BLOCK_SIZE) * MIN_BLOCK_SIZE;//calculate nearest minimum block size total 
+    Block* current = heap;
+    Block* best_fit = NULL;
+
+    while (current) {
+        if (current->is_free && current->size >= total_size) {
+            if (!best_fit || current->size < best_fit->size) {
+                best_fit = current;
+            }
+        }
+        current = current->next;
+    }
+
+    if (!best_fit) return NULL;//if no sutiable block return null
+
+    if (best_fit->size > total_size + sizeof(Block)) {
+        Block* new_block = (Block*)((uint8_t*)best_fit + total_size);
+        new_block->size = best_fit->size - total_size;
+        new_block->is_free = true;
+        new_block->next = best_fit->next;
+        best_fit->next = new_block;
+        best_fit->size = total_size;
+    }
+
+    best_fit->is_free = false;
+    return (void*)(best_fit + 1);
+}
+
+void dma_free(void* ptr) {
+    if (!ptr) return;//checks ptr is NULL or not
+
+    Block* block = (Block*)ptr - 1;
+    block->is_free = true;
+
+    Block* current = heap;
+    while (current) {
+        if (current->is_free && current->next && current->next->is_free) {
+            current->size += current->next->size;
+            current->next = current->next->next;
+        }
+        current = current->next;
+    }
+}
+
+int main() {
+    init_heap();
+
+    void* ptr1 = dma_malloc(sizeof(int) * 128);
+    void* ptr2 = dma_malloc(sizeof(uint8_t) * 1000);
+    void* ptr3 = dma_malloc(128 * 8 * 1024);
+
+    dma_free(ptr1);
+    dma_free(ptr2);
+    dma_free(ptr3);
+
+    return 0;
+}
